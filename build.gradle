@@ -1,0 +1,146 @@
+buildscript {
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath "org.springframework.boot:spring-boot-gradle-plugin:1.5.1.RELEASE"
+		classpath "io.spring.gradle:dependency-management-plugin:1.0.0.RC2"
+	}
+}
+
+apply plugin: "groovy"
+apply plugin: 'maven'
+apply plugin: 'war'
+apply plugin: 'checkstyle'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'jacoco'
+
+sourceCompatibility = 1.8
+
+repositories {
+	mavenCentral()
+}
+
+def apiVersion = '2.9.0'
+
+war {
+	baseName = 'entpromo'
+	version = apiVersion
+	rootSpec.exclude("**/*.so")
+	rootSpec.exclude("**/*.dll")
+	rootSpec.exclude("**/*.dylib")
+}
+
+configurations {
+	integrationTestCompile.extendsFrom testCompile
+	integrationTestRuntime.extendsFrom testRuntime
+}
+
+
+checkstyle {
+	toolVersion = '7.5.1'
+	configFile = rootProject.file('checkstyle.xml')
+}
+
+
+sourceSets {
+	integrationTest {
+		java {
+			compileClasspath += main.output + test.output
+			runtimeClasspath += main.output + test.output
+			srcDir file('src/integration-test/java')
+		}
+		resources.srcDir file('src/integration-test/resources')
+	}
+}
+
+jacocoTestReport {
+	reports {
+		//XML required by coveralls and for the below coverage checks
+		xml.enabled true
+	}
+}
+
+
+bootRun {
+	environment SPRING_PROFILES_ACTIVE: environment.SPRING_PROFILES_ACTIVE ?: "local"
+}
+
+tasks.withType(Test) {
+	reports.html.destination = file("${reporting.baseDir}/${name}")
+	testLogging {
+		// set options for log level LIFECYCLE
+		events "passed", "skipped", "failed", "standardOut"
+		showExceptions true
+		exceptionFormat "full"
+		showCauses true
+		showStackTraces true
+
+		// set options for log level DEBUG and INFO
+		debug {
+			events "started", "passed", "skipped", "failed", "standardOut", "standardError"
+			exceptionFormat "full"
+		}
+		info.events = debug.events
+		info.exceptionFormat = debug.exceptionFormat
+
+		afterSuite { desc, result ->
+			if (!desc.parent) { // will match the outermost suite
+				def output = "Results: ${result.resultType} (${result.testCount} tests, ${result.successfulTestCount} successes, ${result.failedTestCount} failures, ${result.skippedTestCount} skipped)"
+				def startItem = '|  ', endItem = '  |'
+				def repeatLength = startItem.length() + output.length() + endItem.length()
+				println('\n' + ('-' * repeatLength) + '\n' + startItem + output + endItem + '\n' + ('-' * repeatLength))
+			}
+		}
+	}
+}
+
+task integrationTest(type: Test) {
+	testClassesDir = sourceSets.integrationTest.output.classesDir
+	classpath = sourceSets.integrationTest.runtimeClasspath
+}
+
+task copyNativeDeps(type: Copy) {
+	from (configurations.testCompile) {
+		include "*.dylib"
+		include "*.so"
+		include "*.dll"
+	}
+	into 'build/libs/sqlite'
+}
+
+
+check.dependsOn integrationTest
+integrationTest.mustRunAfter test
+
+compileJava.dependsOn copyNativeDeps
+
+def awsSdkBomVersion = '1.11.273'
+
+dependencyManagement {
+	imports {
+		mavenBom 'com.amazonaws:aws-java-sdk-bom:' + awsSdkBomVersion
+	}
+}
+
+dependencies {
+	def springBootVersion = '1.5.1.RELEASE'
+	def lombokVersion = '1.16.8'
+
+	compile('org.springframework.boot:spring-boot-starter-web')
+	providedRuntime('org.springframework.boot:spring-boot-starter-tomcat')
+	testCompile('org.springframework.boot:spring-boot-starter-test')
+
+	compile "org.springframework.cloud:spring-cloud-dependencies:Camden.SR5"
+	compile "org.springframework.boot:spring-boot-starter-actuator:" + springBootVersion
+	compile "org.springframework.boot:spring-boot-starter-web:" + springBootVersion
+	compile "org.springframework.boot:spring-boot-devtools:" + springBootVersion
+	testCompile "org.springframework.boot:spring-boot-starter-test:" + springBootVersion
+	compile "org.apache.httpcomponents:httpclient:4.5.3"
+	compile "io.springfox:springfox-swagger2:2.6.1"
+	compile "io.springfox:springfox-swagger-ui:2.6.1"
+	compile "org.springframework.cloud:spring-cloud-starter-hystrix:1.4.5.RELEASE"
+	compile 'org.projectlombok:lombok:' + lombokVersion
+	compile 'io.rest-assured:rest-assured:3.0.2'
+
+}
